@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Container Perf Eval Config Generator</title>
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .toolbar { margin-bottom: 12px; }
+    button.section-btn { margin: 5px; padding: 8px 10px; }
+    .section { display: none; margin-top: 10px; padding: 12px; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
+    .section.active { display: block; }
+    textarea { width: 100%; height: 90px; font-family: monospace; }
+    label { display: block; margin-top: 8px; }
+    input[type="text"] { width: 320px; margin-bottom: 6px; padding: 6px; }
+    .container-entry { margin-bottom: 10px; padding: 8px; border: 1px solid #ddd; border-radius: 6px; background:#fafafa; }
+    .add-btn, .remove-btn { margin-top: 8px; padding: 6px 10px; color: white; border: none; cursor: pointer; border-radius: 6px; }
+    .add-btn { background-color: #28a745; }
+    .add-btn:hover { background: #218838; }
+    .remove-btn { background-color: #dc3545; }
+    .remove-btn:hover { background:#c82333; }
+    pre { background-color: #f8f8f8; padding: 10px; border: 1px solid #ddd; border-radius: 6px; white-space: pre-wrap; }
+    .row { display:flex; gap:12px; align-items:center; margin-top:8px; }
+    .muted { color:#666; font-size:13px; }
+    .note { font-size:12px; color:#666; margin-top:6px; }
+  </style>
+</head>
+<body>
+  <h1>Container Perf Eval Config Generator</h1>
+
+  <!-- toolbar -->
+  <div class="toolbar">
+    <button class="section-btn" onclick="showSection('image')">Image</button>
+    <button class="section-btn" onclick="showSection('repos')">Repos</button>
+    <button class="section-btn" onclick="showSection('rpms')">RPMs</button>
+    <button class="section-btn" onclick="showSection('containers')">Container Images</button>
+    <button class="section-btn" onclick="showSection('make_dirs')">Make Dirs</button>
+    <button class="section-btn" onclick="showSection('add_files')">Add Files</button>
+    <button class="section-btn" onclick="showSection('chmod_files')">Chmod Files</button>
+    <button class="section-btn" onclick="showSection('systemd')">Systemd</button>
+    <button class="section-btn" onclick="showSection('qm')">QM Options</button>
+  </div>
+
+  <!-- Base sections -->
+  <div id="image" class="section">
+    <h3>Image</h3>
+    <label>Hostname: <input type="text" id="hostname" placeholder="e.g. localhost"></label>
+    <label>SELinux Mode: <input type="text" id="selinux_mode" placeholder="e.g. permissive"></label>
+  </div>
+
+  <div id="repos" class="section">
+    <h3>Repos</h3>
+    <textarea id="reposInput" placeholder="epel_repo,https://fedora.example/9/Everything/$arch/"></textarea>
+    <div class="muted">Format: id,baseurl (one per line). If you only provide id, baseurl will be omitted in YAML.</div>
+  </div>
+
+  <div id="rpms" class="section">
+    <h3>RPMs</h3>
+    <textarea id="rpmsInput" placeholder="lighttpd\nperl"></textarea>
+    <div class="muted">One package per line</div>
+  </div>
+
+  <div id="containers" class="section">
+    <h3>Container Images</h3>
+    <div id="containersList"></div>
+    <button class="add-btn" onclick="addContainerEntry('containersList')">Add Container</button>
+    <div class="muted">Each entry: source, tag, name (optional) and optional containers-storage checkbox</div>
+  </div>
+
+  <div id="make_dirs" class="section">
+    <h3>Make Dirs</h3>
+    <textarea id="dirsInput" placeholder="/etc/containers/systemd/qm.container.d:755:true:true"></textarea>
+    <div class="muted">Format: path:mode:parents:exist_ok (one per line). Mode optional.</div>
+  </div>
+
+  <div id="add_files" class="section">
+    <h3>Add Files</h3>
+    <textarea id="filesInput" placeholder="/etc/systemd/system/service.conf:../files/service.conf"></textarea>
+    <div class="muted">Format: path:source_path (one per line)</div>
+  </div>
+
+  <div id="chmod_files" class="section">
+    <h3>Chmod Files</h3>
+    <textarea id="chmodInput" placeholder="/var/local/shared/:755:false"></textarea>
+    <div class="muted">Format: path:mode:recursive (true/false) (one per line)</div>
+  </div>
+
+  <div id="systemd" class="section">
+    <h3>Systemd</h3>
+    <textarea id="systemdInput" placeholder="prometheus-podman-exporter-asil.service\nlighttpd.service"></textarea>
+    <div class="muted">One service name per line (added to content.systemd.enabled_services)</div>
+  </div>
+
+  <!-- QM section (always present) -->
+  <div id="qm" class="section">
+    <h3>QM Options</h3>
+    <label>QM RPMs</label>
+    <textarea id="qmRpmsInput" placeholder="dnf\nfindutils"></textarea>
+
+    <label>QM Container Images</label>
+    <div id="qmContainersList"></div>
+    <button class="add-btn" onclick="addContainerEntry('qmContainersList')">Add QM Container</button>
+
+    <label>QM Make Dirs</label>
+    <textarea id="qmDirsInput" placeholder="/etc/containers/systemd:true:true"></textarea>
+
+    <label>QM Add Files</label>
+    <textarea id="qmFilesInput" placeholder="/etc/systemd/system/vector-address.service:../files/vector-address.service"></textarea>
+
+    <label>QM Chmod Files</label>
+    <textarea id="qmChmodInput" placeholder="/usr/local/bin/vector-addr:755:false"></textarea>
+
+    <label>QM Systemd</label>
+    <textarea id="qmSystemdInput" placeholder="vector-address.service"></textarea>
+  </div>
+
+  <div style="margin-top:14px;">
+    <button onclick="generateYAML()">Generate YAML</button>
+  </div>
+
+  <h2>Generated YAML</h2>
+  <pre id="output"></pre>
+
+  <script>
+    // show/hide section
+    function showSection(id) {
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      const el = document.getElementById(id);
+      if (el) el.classList.add('active');
+    }
+
+    // add container entry (for base or qm)
+    function addContainerEntry(listId) {
+      const containerList = document.getElementById(listId);
+      const entry = document.createElement('div');
+      entry.className = 'container-entry';
+      entry.innerHTML = `
+        <label>Source: <input type="text" class="container-source" placeholder="registry.example.com/myimg"></label>
+        <label>Tag: <input type="text" class="container-tag" value="latest"></label>
+        <label>Name: <input type="text" class="container-name" placeholder="optional name"></label>
+        <label><input type="checkbox" class="container-transport"> containers-storage</label>
+        <div style="margin-top:8px;"><button type="button" class="remove-btn" onclick="this.closest('.container-entry').remove()">Remove</button></div>
+      `;
+      containerList.appendChild(entry);
+    }
+
+    // parse lines into arrays of parts (trimmed)
+    function parseLines(text, splitter=":") {
+      if (!text) return [];
+      return text.trim().split("\n")
+        .map(l => l.trim())
+        .filter(l => l.length > 0)
+        .map(l => l.split(splitter).map(p => p.trim()));
+    }
+
+    // build content for base or qm (prefix '' or 'qm')
+    function buildContent(prefix) {
+      const pref = prefix || '';
+      const ids = {
+        repos: pref ? (pref + 'ReposInput') : 'reposInput',
+        rpms: pref ? (pref + 'RpmsInput') : 'rpmsInput',
+        containersList: pref ? (pref + 'ContainersList') : 'containersList',
+        dirs: pref ? (pref + 'DirsInput') : 'dirsInput',
+        files: pref ? (pref + 'FilesInput') : 'filesInput',
+        chmod: pref ? (pref + 'ChmodInput') : 'chmodInput',
+        systemd: pref ? (pref + 'SystemdInput') : 'systemdInput'
+      };
+
+      let content = {};
+
+      // repos (id,baseurl)
+      const reposText = document.getElementById(ids.repos)?.value || "";
+      const reposArr = parseLines(reposText, ',');
+      if (reposArr.length) {
+        const repos = reposArr.map(parts => {
+          const obj = {};
+          const id = (parts[0] || "").trim();
+          const baseurl = (parts[1] || "").trim();
+          if (id) obj.id = id;
+          if (baseurl) obj.baseurl = baseurl; // only add baseurl if non-empty
+          return obj;
+        }).filter(r => r.id);
+        if (repos.length) content.repos = repos;
+      }
+
+      // rpms
+      const rpmsText = document.getElementById(ids.rpms)?.value || "";
+      const rpms = rpmsText.split("\n").map(s => s.trim()).filter(Boolean);
+      if (rpms.length) content.rpms = rpms;
+
+      // container_images
+      const containerDiv = document.getElementById(ids.containersList);
+      if (containerDiv) {
+        const entries = containerDiv.querySelectorAll('.container-entry');
+        const containers = [];
+        entries.forEach(e => {
+          const source = (e.querySelector('.container-source')?.value || "").trim();
+          const tag = (e.querySelector('.container-tag')?.value || "").trim();
+          const name = (e.querySelector('.container-name')?.value || "").trim();
+          const transport = !!(e.querySelector('.container-transport')?.checked);
+          if (source || tag || name || transport) {
+            const c = {};
+            if (source) c.source = source;
+            if (tag) c.tag = tag;
+            if (name) c.name = name;
+            if (transport) c["containers-transport"] = "containers-storage";
+            containers.push(c);
+          }
+        });
+        if (containers.length) content.container_images = containers;
+      }
+
+      // make_dirs
+      const dirsText = document.getElementById(ids.dirs)?.value || "";
+      const dirs = parseLines(dirsText, ':');
+      if (dirs.length) {
+        content.make_dirs = dirs.map(d => ({
+          path: d[0] || "",
+          mode: d[1] || undefined,
+          parents: (d[2] || "").toLowerCase() === "true",
+          exist_ok: (d[3] || "").toLowerCase() === "true"
+        })).filter(d => d.path);
+      }
+
+      // add_files
+      const filesText = document.getElementById(ids.files)?.value || "";
+      const files = parseLines(filesText, ':');
+      if (files.length) {
+        content.add_files = files.map(f => ({ path: f[0] || "", source_path: f[1] || "" })).filter(f => f.path && f.source_path);
+      }
+
+      // chmod_files
+      const chmodText = document.getElementById(ids.chmod)?.value || "";
+      const chmods = parseLines(chmodText, ':');
+      if (chmods.length) {
+        content.chmod_files = chmods.map(c => ({ path: c[0] || "", mode: (c[1] || "").toString(), recursive: (c[2] || "").toLowerCase() === "true" })).filter(c => c.path && c.mode);
+      }
+
+      // systemd
+      const systemdText = document.getElementById(ids.systemd)?.value || "";
+      const services = systemdText.split("\n").map(s => s.trim()).filter(Boolean);
+      if (services.length) content.systemd = { enabled_services: services };
+
+      return content;
+    }
+
+    // Generate YAML
+    function generateYAML() {
+      const config = { name: "container-perf-eval" };
+
+      // image
+      const hostname = document.getElementById('hostname')?.value.trim();
+      const selinux = document.getElementById('selinux_mode')?.value.trim();
+      if (hostname || selinux) {
+        config.image = {};
+        if (hostname) config.image.hostname = hostname;
+        if (selinux) config.image.selinux_mode = selinux;
+      }
+
+      // base content
+      const baseContent = buildContent('');
+      if (Object.keys(baseContent).length) config.content = baseContent;
+
+      // always include qm if user filled qm fields
+      const qmContent = buildContent('qm');
+      if (Object.keys(qmContent).length) {
+        config.qm = qmContent;
+      }
+
+      document.getElementById('output').textContent = jsyaml.dump(config);
+    }
+
+    // show image section by default
+    showSection('image');
+  </script>
+</body>
+</html>
