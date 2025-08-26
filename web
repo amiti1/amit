@@ -51,7 +51,7 @@
   <div id="repos" class="section">
     <h3>Repos</h3>
     <textarea id="reposInput" placeholder="epel_repo,https://fedora.example/9/Everything/$arch/"></textarea>
-    <div class="muted">Format: id,baseurl (one per line). If you only provide id, baseurl will be omitted in YAML.</div>
+    <div class="muted">Format: id,baseurl or "id baseurl" or "id baseurl:URL" (one per line). If you only provide id, baseurl is omitted.</div>
   </div>
 
   <div id="rpms" class="section">
@@ -168,18 +168,42 @@
 
       let content = {};
 
-      // repos (id,baseurl)
+      // repos (id,baseurl) — accept flexible formats
       const reposText = document.getElementById(ids.repos)?.value || "";
-      const reposArr = parseLines(reposText, ',');
-      if (reposArr.length) {
-        const repos = reposArr.map(parts => {
-          const obj = {};
-          const id = (parts[0] || "").trim();
-          const baseurl = (parts[1] || "").trim();
-          if (id) obj.id = id;
-          if (baseurl) obj.baseurl = baseurl; // only add baseurl if non-empty
-          return obj;
-        }).filter(r => r.id);
+      const repoLines = reposText.trim().split("\n").map(s => s.trim()).filter(Boolean);
+      if (repoLines.length) {
+        const repos = [];
+        repoLines.forEach(line => {
+          let id = "";
+          let baseurl = "";
+
+          if (line.includes(",")) {
+            const parts = line.split(",").map(s => s.trim());
+            id = parts[0] || "";
+            baseurl = parts[1] || "";
+          } else {
+            const mKeyed = line.match(/baseurl\s*:\s*(\S+)/i);
+            if (mKeyed) {
+              baseurl = mKeyed[1];
+              const before = line.replace(/baseurl\s*:\s*\S+/i, "").trim();
+              id = (before.split(/\s+/)[0] || "").trim();
+            } else {
+              const mWs = line.match(/^(\S+)\s+(https?:\/\/\S+)/i);
+              if (mWs) {
+                id = mWs[1];
+                baseurl = mWs[2];
+              } else {
+                id = line;
+              }
+            }
+          }
+
+          if (id) {
+            const obj = { id: id };
+            if (baseurl) obj.baseurl = baseurl;
+            repos.push(obj);
+          }
+        });
         if (repos.length) content.repos = repos;
       }
 
