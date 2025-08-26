@@ -51,7 +51,7 @@
   <div id="repos" class="section">
     <h3>Repos</h3>
     <textarea id="reposInput" placeholder="epel_repo,https://fedora.example/9/Everything/$arch/"></textarea>
-    <div class="muted">Format: id,baseurl or "id baseurl" or "id baseurl:URL" (one per line). If you only provide id, baseurl is omitted.</div>
+    <div class="muted">Accepted: "id,baseurl", "id https://...", "id baseurl:https://...", "id=<id> baseurl=<url>", "baseurl=<url>", or just a URL. Inline # comments supported.</div>
   </div>
 
   <div id="rpms" class="section">
@@ -153,6 +153,20 @@
         .map(l => l.split(splitter).map(p => p.trim()));
     }
 
+    // generate a reasonable repo id from a URL
+    function generateRepoIdFromUrl(urlStr) {
+      try {
+        const u = new URL(urlStr);
+        const host = (u.hostname || "repo").replace(/[^a-z0-9]+/gi, "-");
+        const pathSegments = (u.pathname || "").split("/").filter(Boolean);
+        const tail = (pathSegments[pathSegments.length - 1] || "repo").replace(/[^a-z0-9]+/gi, "-");
+        const id = `${host}-${tail}`.toLowerCase().replace(/-+/g, "-").replace(/^-|-$|/g, "");
+        return id || "repo";
+      } catch (e) {
+        return (urlStr || "repo").replace(/^https?:\/\//i, "").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+      }
+    }
+
     // build content for base or qm (prefix '' or 'qm')
     function buildContent(prefix) {
       const pref = prefix || '';
@@ -168,33 +182,60 @@
 
       let content = {};
 
-      // repos (id,baseurl) — accept flexible formats
+      // repos (id,baseurl) — flexible parsing with key=value and inline comment stripping
       const reposText = document.getElementById(ids.repos)?.value || "";
-      const repoLines = reposText.trim().split("\n").map(s => s.trim()).filter(Boolean);
+      const repoLines = reposText.split("\n")
+        .map(s => s.replace(/\s*#.*/, "").trim())
+        .filter(Boolean);
       if (repoLines.length) {
         const repos = [];
         repoLines.forEach(line => {
           let id = "";
           let baseurl = "";
 
-          if (line.includes(",")) {
+          // extract key=value or key: value pairs
+          let tmp = line;
+          tmp = tmp.replace(/(?:^|[\s,])(id|baseurl)\s*[=:]\s*(\S+)/gi, (m, k, v) => {
+            const key = String(k).toLowerCase();
+            if (key === 'id' && !id) id = v;
+            if (key === 'baseurl' && !baseurl) baseurl = v;
+            return ' ';
+          }).trim();
+
+          // find URL if not provided via key
+          if (!baseurl) {
+            const urlMatch = tmp.match(/https?:\/\/\S+/i);
+            if (urlMatch) {
+              baseurl = urlMatch[0];
+              tmp = tmp.replace(urlMatch[0], ' ').trim();
+            }
+          }
+
+          // legacy: id,baseurl
+          if ((!id || !baseurl) && line.includes(",")) {
             const parts = line.split(",").map(s => s.trim());
-            id = parts[0] || "";
-            baseurl = parts[1] || "";
-          } else {
-            const mKeyed = line.match(/baseurl\s*:\s*(\S+)/i);
-            if (mKeyed) {
-              baseurl = mKeyed[1];
-              const before = line.replace(/baseurl\s*:\s*\S+/i, "").trim();
-              id = (before.split(/\s+/)[0] || "").trim();
+            if (!id && parts[0]) id = parts[0];
+            if (!baseurl && parts[1] && /^https?:\/\//i.test(parts[1])) baseurl = parts[1];
+          }
+
+          // legacy: "id https://..."
+          if (!id || !baseurl) {
+            const mWs = line.match(/^(\S+)\s+(https?:\/\/\S+)/i);
+            if (mWs) {
+              if (!id) id = mWs[1];
+              if (!baseurl) baseurl = mWs[2];
+            }
+          }
+
+          // if id still empty, use remaining token or generate from URL
+          if (!id) {
+            const leftover = tmp.split(/[\s,]+/).filter(Boolean);
+            if (leftover.length) {
+              id = leftover[0];
+            } else if (baseurl) {
+              id = generateRepoIdFromUrl(baseurl);
             } else {
-              const mWs = line.match(/^(\S+)\s+(https?:\/\/\S+)/i);
-              if (mWs) {
-                id = mWs[1];
-                baseurl = mWs[2];
-              } else {
-                id = line;
-              }
+              id = line.trim();
             }
           }
 
